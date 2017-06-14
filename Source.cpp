@@ -19,16 +19,39 @@ using namespace std;
 unsigned int cpuCount = 1;
 mutex scopeMutex;
 
-int countFileLine(const vector<string> &filenames, vector<int> &countResult, int start, int end) {
+int getLineNumber(string filename) {
+	FILE *fp;
+	int n = 0;
+	char buffer[4096];
+
+	if ((fp = fopen(filename.c_str(), "r")) == NULL)    return -1;
+
+	while ((fgets(buffer, 4096, fp)) != NULL)
+	{
+		if (buffer[strlen(buffer) - 1] == '\n')
+		{
+			n++;
+		}
+	}
+
+	fclose(fp);
+	return n;
+}
+int countFileLine(const vector<string> &filenames, int * startIter, int start, int end) {
 	mutex::scoped_lock lock(scopeMutex);
-	fprintf(stderr, "start:%d, end:%d\n", start, end);
+	//fprintf(stderr, "start:%d, end:%d\n", start, end);
 	//for (auto &f : filenames) {
 	//	//fprintf(stderr, "%s\n", f);
 	//	cout << f << '\n';
 	//}
 	for (int i = start; i <= end; ++i) {
-		cout << filenames[i] << '\n';
+		//cout << filenames[i] << '\n';
+		int ret = getLineNumber(filenames[i]);
+		if (ret > 0) {
+			*startIter++ = ret;
+		}
 	}
+	cout << " " << endl;
 	return 0; 
 }
 
@@ -88,10 +111,18 @@ int main(int argc, char *argv[]) {
 		int start = thresh * i;
 		int end   = thresh * (i + 1) - 1;
 		if (end >= fileNameList.size())    end = fileNameList.size() - 1;
-		group.create_thread(bind(countFileLine, fileNameList, lineCountResult, start, end));
+		group.create_thread(bind(&countFileLine, fileNameList, lineCountResult.data() + start, start, end));
 	}
 	group.join_all();
 
+	for (auto &f : lineCountResult) {
+		cout << f << endl;
+	}
+	for (int i = 0; i < fileNameList.size(); ++i) {
+		cout << lineCountResult[i] << " : " << fileNameList[i] << '\n';
+	}
+
 	::system("pause");
+
 	return 0;
 }
