@@ -9,7 +9,7 @@
 #include <boost/filesystem.hpp>
 #include <boost/thread/mutex.hpp>
 #include <typeinfo>
-#include <math.h>
+//#include <math.h>
 #include <iomanip>
 
 using namespace boost;
@@ -18,15 +18,18 @@ using namespace std;
 unsigned int cpuCount = 1;
 mutex scopeMutex;
 
-int getLineNumber(string filename) {
+int getLineNumber(string filename, char *buffer) {
 	FILE *fp;
-	int n = 0;
-	char buffer[4096];
+	int lineCount = 0;
+	int closeRet;
 
 	//if ((fp = fopen(filename.c_str(), "rb")) == NULL)    return -1;
 	//fclose(fp);
 
-	if ((fp = fopen(filename.c_str(), "rb")) == NULL)    return -1;
+	if ((fp = fopen(filename.c_str(), "rb")) == NULL) {
+		fprintf(stderr, "%s\nfopen failed, errno = %d : %s\n", filename.c_str(), errno, strerror(errno));
+		return -1;
+	}
 	/* check text file */
 	char checkText[100];
 	int readCount = fread(checkText, 1, 100, fp);
@@ -35,35 +38,41 @@ int getLineNumber(string filename) {
 		for (int i = 0; i < readCount; ++i) {
 			if (checkText[i] == '\0')    ++checkZeroCount;
 		}
-		if (checkZeroCount > 2)    return -2;
+		if (checkZeroCount > 2) {
+			lineCount = -2;    //not text file
+		}
 	}
 	else {
-		return -1;
+		lineCount = -3;    //fread error
 	}
 	/* calculate line count */
 	rewind(fp);
-	while (true) {
-		if (fgets(buffer, 4096, fp) != NULL) {
-			if (buffer[strlen(buffer) - 1] == '\n')
-			{
-				n++;
+	if (lineCount == 0) {
+		while (true) {
+			if (fgets(buffer, 4096, fp) != NULL) {
+				if (buffer[strlen(buffer) - 1] == '\n')
+				{
+					lineCount++;
+				}
+			}
+			else if (feof(fp)) {
+				lineCount++;
+				break;
+			}
+			else if (ferror(fp)) {
+				lineCount = -4;    //fgets error
+				break;
 			}
 		}
-		else if (feof(fp)) {
-			n++;
-			break;
-		}
-		else if (ferror(fp)) {
-			n = -1;
-			break;
-		}
 	}
-	fclose(fp);
-	return n;
+	if ((closeRet = fclose(fp)) == EOF)
+		fprintf(stderr, "fclose failed, errno = %d : %s\n", errno, strerror(errno));
+	return lineCount;
 }
 int countFileLine(const vector<string> &filenames, int * startIter, int start, int end) {
 	//mutex::scoped_lock lock(scopeMutex);
-	for (int i = start; i <= end; ++i)    *startIter++ = getLineNumber(filenames[i]);
+	char buffer[4096];
+	for (int i = start; i <= end; ++i)    *startIter++ = getLineNumber(filenames[i], buffer);
 	return 0;
 }
 
@@ -86,22 +95,31 @@ int main(int argc, char *argv[]) {
 	vector<string> fileNameList;
 	filesystem::path rootPath(argv[1], filesystem::native);
 
-	if (!filesystem::exists(rootPath))    return -3;
+	if (!filesystem::exists(rootPath)) {
+		cout << "root path not exist: " << rootPath.string() << '\n';
+		return 2;
+	}
 	if (filesystem::is_directory(rootPath)) {
 		filesystem::recursive_directory_iterator end_iter;
-		for (filesystem::recursive_directory_iterator iter(rootPath); iter != end_iter; iter++) {
+		for (filesystem::recursive_directory_iterator iter(rootPath); iter != end_iter; ) {
 			try {
 				if (!filesystem::is_directory(*iter))
 					fileNameList.push_back(iter->path().string());
+				iter++;
 			}
 			catch (const boost::filesystem::filesystem_error & ex) {
-				cerr << ex.what() << endl;
+				cerr << iter->path().string() << '\n';//current or next?;
+				cerr << ex.what() << '\n';
 				continue;
 			}
 		}
 	}
 	else {
 		fileNameList.push_back(rootPath.string());
+	}
+	if (fileNameList.size() <= 0) {
+		cout << "empty root folder: " << rootPath.string() << '\n';
+		return 3;
 	}
 	vector<int> lineCountResult(fileNameList.size());
 
